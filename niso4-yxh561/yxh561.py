@@ -2,6 +2,7 @@ import random
 import argparse
 import csv
 import math
+import signal
 #import matplotlib.pyplot as plt
 #import numpy as np
 from string import whitespace
@@ -182,8 +183,7 @@ def evaluate(expr, n, x):
 ##                return 0
 
 def nodeEval(nexpr, n, lx):
-    if type(nexpr.data) == float:
-        return float(nexpr.data)
+    
 
     if nexpr.data == "add":
             return float(nodeEval(nexpr.val1, n, lx)) + float(nodeEval(nexpr.val2, n, lx))
@@ -251,7 +251,8 @@ def nodeEval(nexpr, n, lx):
                     return total/(higher-lower)
             else:
                     return 0
-
+    else:
+        return float(nexpr.data)
 
 
 #transform a parsed expression to a tree
@@ -289,7 +290,7 @@ def lexprToTree(lexpr):
 
 
 def fitness(expr, n, m, data):
-    rawfile = open(wdimacs, "r")
+    rawfile = open(data, "r")
     file = rawfile.read()
     filelines = file.splitlines()
 
@@ -297,7 +298,12 @@ def fitness(expr, n, m, data):
     for line in filelines:
         lline = line.split("\t")
         val = evaluate(expr, n, lline[0:-1])
-        diff = ( float(lline[-1]) - val )**2
+        #overflow error when evaluation value is too high                
+        try:
+            diff = ( float(lline[-1]) - val )**2
+        except OverflowError:
+            diff = 999
+            
         totalDiff += diff
 
     return totalDiff/m
@@ -402,31 +408,39 @@ def crossover(t1, t2):
     if len(lt1) > 1:
         randomT1branch = lt1[random.randint(1,(len(lt1)-1))]
     else:
-        return (t1,t2) #can't crossover 
+        return t2 #can't crossover 
     if len(lt2) > 1:
         randomT2branch = lt2[random.randint(1,(len(lt2)-1))]
     else:
-        return (t1,t2) #can't crossover
+        return t1 #can't crossover
 
     newT1 = replace(t1, randomT1branch, randomT2branch)
     newT2 = replace(t2, randomT2branch, randomT1branch)
 
-    return (newT1,newT2)
+    if random.random() < 0.5:
+        return newT1
+    else:
+        return newT2
 
 def tournSelection(poplist, k):
-    #k = 2
-    lowest = 99999999999
+    winner = None
+    lowest = float("inf")
     for i in range(0,k):
         member = poplist[random.randint(0,len(poplist)-1)]
         if float(member[1]) <= float(lowest):
             winner = member[0]
             lowest = member[1]
-    return winner
+
+    #if all random members didn't get below default lowest value, return a random member as winner
+    if type(winner) == None:
+        return poplist[random.randint(0,len(poplist)-1)][0]
+    else:
+        return winner
 
 
 def mutate(tree, chi, newTreeMaxDepth):
     if random.random() < chi:
-        lTree = recTraverseTree(tree, [])
+        lTree = recTraveseTree(tree, [])
         randomBranch = lTree[random.randint(0,(len(lTree)-1))]
         newTree = replace(tree, randomBranch, randomTree(newTreeMaxDepth))
         return newTree
@@ -434,12 +448,17 @@ def mutate(tree, chi, newTreeMaxDepth):
         return tree
     
 def ga(arg_lambda, n, m, data, time_budget):
+    #n is dimension of input vector
+    #m is how many lines of training data there is
     #need global variable here for generate randomBalancedTree function
     global b
     b = n
-
+    
     treeDepth = 6
-
+    k = 2
+    chi = 0
+    mutateTreeMaxDepth = 5
+    
     #start timer
     timeup = False
     signal.signal(signal.SIGALRM, signal_handler)
@@ -452,11 +471,11 @@ def ga(arg_lambda, n, m, data, time_budget):
         perSection = math.floor(arg_lambda / partitions)
         for i in range(2,treeDepth):
             for j in range(0,perSection):
-                pop.append((randomBalancedTree(i),0))
-                pop.append((randomTree(i),1))
+                pop.append([randomBalancedTree(i),0])
+                pop.append([randomTree(i),1])
         if len(pop) < arg_lambda: #add more to make up to lambda if any are missing
             for i in range(len(pop), arg_lambda):
-                pop.append((randomTree(treeDepth),0))
+                pop.append([randomTree(treeDepth),0])
 
     ##    for i in pop:
     ##        print(i[0])
@@ -477,14 +496,14 @@ def ga(arg_lambda, n, m, data, time_budget):
             for i in range(0, arg_lambda):
                 x = tournSelection(pop,k)
                 y = tournSelection(pop,k)
-                mx = mutate(x, chi, newTreeMaxDepth)
-                my = mutate(y, chi, newTreeMaxDepth)
+                mx = mutate(x, chi, mutateTreeMaxDepth)
+                my = mutate(y, chi, mutateTreeMaxDepth)
                 child = crossover(mx, my)
                 childScore = fitness(child, n, m, data)
                 if childScore <= lowest:
                     xbest = child
                     lowest = childScore
-                newpop.append((child,childScore))
+                newpop.append([child,childScore])
             pop = newpop
             t += 1
             
@@ -492,7 +511,10 @@ def ga(arg_lambda, n, m, data, time_budget):
         timeup = True
         print(xbest)
     
-                                                    
+def signal_handler(signum, frame):
+    raise StopIteration("Time up")
+
+                                                   
 def test():
     a = str(randomTree(5))
     print(a)
